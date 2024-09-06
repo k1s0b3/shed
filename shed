@@ -1,0 +1,265 @@
+#!/bin/bash
+
+VERSION="v0.0.1"
+BUFFER=()
+FILENAME=""
+PREFIX="~"
+PROMPT=""
+
+startup_message() {
+    echo "shed $VERSION - type $PREFIX for commands, otherwise just start typing"
+}
+
+show_help() {
+    echo "$PREFIX represents your prefix, if you changed the prefix use that instead"
+    echo "key: ${PREFIX}command arg1/alt_arg1 arg2 [optional_arg] - what the command does"
+    echo "${PREFIX}about - display about text"
+    echo "${PREFIX}clear - clear buffer"
+    echo "${PREFIX}copy [line] - copy line or whole buffer to clipboard"
+    echo "${PREFIX}correct - replace most recent line (interactive)"
+    echo "${PREFIX}delete line/start [end] - immediately delete specified line or range of lines"
+	echo "${PREFIX}exit - exit shed"
+    echo "${PREFIX}help - display this list"
+    echo "${PREFIX}indent line level - indent a line, negative level will un-indent"
+    echo "${PREFIX}insert line - insert text at specified line (interactive)"
+    echo "${PREFIX}open [filename] - load file into buffer"
+    echo "${PREFIX}prefix [prefix]"
+    echo "${PREFIX}prompt [prompt] - set an input prompt"
+    echo "${PREFIX}replace line - replace specified line (interactive)"
+    echo "${PREFIX}run command - run executable or shell builtin"
+    echo "${PREFIX}runhere command - run executable or shell builtin on file contents"
+    echo "${PREFIX}save [filename] - save buffer to file"
+    echo "${PREFIX}search term - perform regex search in whole buffer"
+    echo "${PREFIX}show [start] [end] - Display the contents of the buffer."
+    echo "${PREFIX}showhere [start] [end] - Display the contents of the buffer inline."
+    echo "${PREFIX}substitute line pattern/replacement - perform regex substitution on specified line"
+    echo "${PREFIX}swap source target - swap two lines"
+}
+
+show_about() {
+	echo "shed $VERSION - a simple ed-like text editor implemented in bash"
+}
+
+clear_buffer() {
+    BUFFER=()
+    echo "Buffer cleared"
+}
+
+copy_to_clipboard() {
+    if [ -z "$1" ]; then
+        printf "%s\n" "${BUFFER[@]}" | xclip -selection clipboard
+        echo "Entire buffer copied to clipboard"
+    else
+        if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ]; then
+            echo "${BUFFER[$1-1]}" | xclip -selection clipboard
+            echo "Line $1 copied to clipboard"
+        else
+            echo "Invalid line number"
+        fi
+    fi
+}
+
+correct_last_line() {
+    if [ ${#BUFFER[@]} -gt 0 ]; then
+        echo "Current last line: ${BUFFER[-1]}"
+        read -p "Enter correction: " correction
+        BUFFER[-1]="$correction"
+        echo "Line corrected"
+    else
+        echo "Buffer is empty"
+    fi
+}
+
+delete_lines() {
+    if [ -z "$2" ]; then
+        if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ]; then
+            unset 'BUFFER[$1-1]'
+            BUFFER=("${BUFFER[@]}")
+            echo "Line $1 deleted"
+        else
+            echo "Invalid line number"
+        fi
+    else
+        if [ "$1" -ge 1 ] && [ "$2" -le "${#BUFFER[@]}" ] && [ "$1" -le "$2" ]; then
+            for ((i=1; i<="$2"-"$1"+1; i++)); do
+                unset 'BUFFER[$i-1]'
+            done
+            BUFFER=("${BUFFER[@]}")
+            echo "Lines $1 to $2 deleted"
+        else
+            echo "Invalid range"
+        fi
+    fi
+}
+
+indent_line() {
+    if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ]; then
+        if [ "$2" -gt 0 ]; then
+            BUFFER[$1-1]=$(printf "%*s%s" "$2" "" "${BUFFER[$1-1]}")
+        elif [ "$2" -lt 0 ]; then
+            BUFFER[$1-1]=$(echo "${BUFFER[$1-1]}" | sed 's/^[ \t]\{1,'$((0-2))'\}//')
+        fi
+        echo "Line $1 indented by $2 levels"
+    else
+        echo "Invalid line number"
+    fi
+}
+
+insert_line() {
+    if [ "$1" -ge 1 ] && [ "$1" -le "$((${#BUFFER[@]} + 1))" ]; then
+        read -p "Enter text to insert: " text
+        BUFFER=("${BUFFER[@]:0:$1-1}" "$text" "${BUFFER[@]:$1-1}")
+        echo "Text inserted at line $1"
+    else
+        echo "Invalid line number"
+    fi
+}
+
+open_file() {
+    if [ -f "$1" ]; then
+        mapfile -t BUFFER < "$1"
+        FILENAME="$1"
+        echo "File loaded: $FILENAME"
+    else
+        echo "File not found"
+    fi
+}
+
+set_prefix() {
+    if [ -n "$1" ]; then
+        PREFIX="$1"
+        echo "Prefix set to $PREFIX"
+    else
+        echo "Current prefix is $PREFIX"
+    fi
+}
+
+set_prompt() {
+    PROMPT="$1"
+    echo "Prompt set to '$PROMPT'"
+}
+
+replace_line() {
+    if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ]; then
+        echo "Current line $1: ${BUFFER[$1-1]}"
+        read -p "Enter replacement: " replacement
+        BUFFER[$1-1]="$replacement"
+        echo "Line $1 replaced"
+    else
+        echo "Invalid line number"
+    fi
+}
+
+run_command() {
+    eval "$@"
+}
+
+run_command_on_buffer() {
+    printf "%s\n" "${BUFFER[@]}" | eval "$@"
+}
+
+save_file() {
+    if [ -n "$1" ]; then
+        printf "%s\n" "${BUFFER[@]}" > "$1"
+        echo "File saved: $1"
+    else
+        echo "No filename specified"
+    fi
+}
+
+search_buffer() {
+    grep -n "$1" <(printf "%s\n" "${BUFFER[@]}")
+}
+
+show_buffer() {
+    start=${1:-1}
+    end=${2:-${#BUFFER[@]}}
+    
+    printf "%s\n" "${BUFFER[@]}" | awk -v start="$start" -v end="$end" 'NR >= start && NR <= end { printf "%4d│%s\n", NR, $0 }' | less +G
+}
+
+show_inline() {
+	start=${1:-1}
+	end=${2:-${#BUFFER[@]}}
+	for ((i=start; i<=end; i++)); do
+	    printf "%${#end}d" $i
+	    echo "│${BUFFER[$i-1]}"
+	done
+}
+
+substitute_in_line() {
+    if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ]; then
+        IFS='/' read -ra parts <<< "$2"
+        if [ ${#parts[@]} -eq 2 ]; then
+            BUFFER[$1-1]=$(echo "${BUFFER[$1-1]}" | sed "s/${parts[0]}/${parts[1]}/g")
+            echo "Substitution performed on line $1"
+        else
+            echo "Invalid substitution format. Use pattern/replacement"
+        fi
+    else
+        echo "Invalid line number"
+    fi
+}
+
+swap_lines() {
+    if [ "$1" -ge 1 ] && [ "$1" -le "${#BUFFER[@]}" ] && [ "$2" -ge 1 ] && [ "$2" -le "${#BUFFER[@]}" ]; then
+        temp="${BUFFER[$1-1]}"
+        BUFFER[$1-1]="${BUFFER[$2-1]}"
+        BUFFER[$2-1]="$temp"
+        echo "Lines $1 and $2 swapped"
+    else
+        echo "Invalid line numbers"
+    fi
+}
+
+main() {
+    if [ $# -eq 1 ]; then
+        FILENAME="$1"
+        if [ -f "$FILENAME" ]; then
+            open_file "$FILENAME"
+        else
+            echo "New file: $FILENAME"
+        fi
+    fi
+
+    startup_message
+    while true; do
+        if [ -n "$PROMPT" ]; then
+            read -e -p "$PROMPT" input
+        else
+            read -e input
+        fi
+        if [[ "$input" == "$PREFIX"* ]]; then
+            cmd=(${input#$PREFIX})
+            case "${cmd[0]}" in
+                about) show_about ;;
+                clear) clear_buffer ;;
+                copy) copy_to_clipboard "${cmd[1]}" ;;
+                correct) correct_last_line ;;
+                delete) delete_lines "${cmd[1]}" "${cmd[2]}" ;;
+                exit) exit 0 ;;
+                help) show_help ;;
+                indent) indent_line "${cmd[1]}" "${cmd[2]}" ;;
+                insert) insert_line "${cmd[1]}" ;;
+                open) open_file "${cmd[1]}" ;;
+                prefix) set_prefix "${cmd[1]}" ;;
+                prompt) set_prompt "${cmd[@]:1}" ;;
+                replace) replace_line "${cmd[1]}" ;;
+                run) run_command "${cmd[@]:1}" ;;
+                runhere) run_command_on_buffer "${cmd[@]:1}" ;;
+                save) save_file "${cmd[1]}" ;;
+                search) search_buffer "${cmd[@]:1}" ;;
+                show) show_buffer "${cmd[1]}" "${cmd[2]}" ;;
+                showhere) show_inline "${cmd[1]}" "${cmd[2]}" ;;
+                substitute) substitute_in_line "${cmd[1]}" "${cmd[@]:2}" ;;
+                swap) swap_lines "${cmd[1]}" "${cmd[2]}" ;;
+                *) echo "Unknown command. Type ${PREFIX}help for a list of commands." ;;
+            esac
+        else
+            BUFFER+=("$input")
+        fi
+    done
+}
+
+main "$@"
+
