@@ -10,16 +10,14 @@
   - [Tips](#tips)
 - [Inspiration](#inspiration)
 
-
 ## Features
 
 - Easy to use as a line editor
 
 ## Prerequisites
 
-- `bash`
-
 - `awk`
+- `bash`
 - `less`
 - `sed`
 - `xclip`
@@ -61,8 +59,8 @@ key: ~command arg1/alt_arg1 arg2 [optional_arg] - what the command does
 ~runhere command - run executable or shell builtin on buffer contents
 ~save [filename] - save buffer to file
 ~search term - perform regex search in whole buffer
-~show [start] [end] - Display the contents of the buffer.
-~showhere [start] [end] - Display the contents of the buffer inline.
+~show [start] [end] - display the contents of the buffer
+~showhere [start] [end] - display the contents of the buffer inline
 ~substitute line pattern/replacement - perform regex substitution on specified line
 ~swap source target - swap two lines
 ```
